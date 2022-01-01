@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use crate::AppState;
 use crate::data::{BashoId, BashoInfo, Rank};
 use crate::data::leaders::HistoricLeader;
@@ -16,6 +18,7 @@ pub struct IndexTemplate {
     current_basho: Option<BashoInfo>,
     prev_basho: Option<BashoInfo>,
     next_basho_id: BashoId,
+    hero_img_src: String,
 }
 
 impl IndexTemplate {
@@ -40,18 +43,17 @@ impl IndexTemplate {
     }
 }
 
-const LEADER_BASHO_COUNT_OPTIONS: [usize; 3] = [6, 3, 2];
 const LEADERS_LIMIT: u32 = 270;
 
 pub async fn index(state: web::Data<AppState>, identity: Identity) -> Result<IndexTemplate> {
     let db = state.db.lock().unwrap();
     let (current_basho, prev_basho) = BashoInfo::current_and_previous(&db)?;
     let next_basho_id =
-        current_basho.as_ref().or_else(|| prev_basho.as_ref())
+        prev_basho.as_ref()
         .map(|basho| basho.id.next())
         .unwrap_or_else(|| "201911".parse().unwrap());
-    let first_leaders_basho = prev_basho.as_ref().map(|basho| basho.id.incr(-5));
-    let leaders = HistoricLeader::with_first_basho(&db, first_leaders_basho, LEADERS_LIMIT)?;
+    let leaders_basho_range = Range {start: next_basho_id.incr(-6), end: next_basho_id};
+    let leaders = HistoricLeader::with_basho_range(&db, leaders_basho_range, LEADERS_LIMIT)?;
     let self_leader_index = match identity.player_id() {
         Some(id) => leaders.iter().position(|l| l.player.id == id),
         None => None
@@ -62,19 +64,7 @@ pub async fn index(state: web::Data<AppState>, identity: Identity) -> Result<Ind
         self_leader_index,
         current_basho,
         prev_basho,
-        next_basho_id
+        next_basho_id,
+        hero_img_src: state.config.hero_img_src.to_owned(),
     })
-}
-
-fn nth_completed_basho_id(basho_list: &[BashoInfo], n: usize) -> Option<BashoId> {
-    if basho_list.is_empty() { return None; }
-
-    let mut n = n;
-    if basho_list.first().unwrap().winners.is_empty() {
-        n += 1;
-    }
-    if n >= basho_list.len() {
-        n = basho_list.len() - 1;
-    }
-    basho_list.get(n).map(|b| b.id)
 }
